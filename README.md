@@ -1,10 +1,16 @@
 # NanoMA
 
+[![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white)](pyproject.toml)
+![Version](https://img.shields.io/badge/version-0.9.1-7c3aed)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 **A minimal multi-agent harness for research.** ~2000 lines of Python.
 
 NanoMA provides the thinnest possible runtime for studying multi-agent LLM coordination.
 It is deliberately unopinionated — the framework supplies primitives (spawn, send, wait, kill, shared filesystem),
 and the orchestration pattern emerges entirely from the prompt you give the root agent.
+
+![NanoMA trace viewer](assets/nanoma-trace-viewer.webp)
 
 ## Why
 
@@ -151,6 +157,10 @@ python nanoma/viewer.py ./logs 8900
 Features: event timeline, D3 force-directed communication graph, click-to-inspect LLM calls.
 Uses Server-Sent Events (SSE) for live streaming — no stale data.
 
+### Screenshots
+
+![NanoMA communication map](assets/nanoma-communication-map.webp)
+
 ## Configuration
 
 ```python
@@ -172,5 +182,18 @@ RuntimeConfig(
     compress_max_messages=40,
     compress_max_chars=300,    # 0 = keep full content
 )
+```
+
+## Citation
+
+If you use NanoMA in your research, please cite:
+
+```bibtex
+@software{he2026nanoma,
+  author = {Jiyan He},
+  title = {NanoMA: A Minimal Multi-Agent Harness for Research},
+  year = {2026},
+  url = {https://github.com/volltin/NanoMA}
+}
 ```
 

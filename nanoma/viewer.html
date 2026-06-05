@@ -438,46 +438,36 @@ async function poll(){
     if(d.events&&d.events.length>0){
       for(const ev of d.events)processEvent(ev);
       lastLen=d.total;
-      renderAgents();render();updateStats();
+      renderAgents();render();updateStats();updateCommMapIfOpen();
     }
   }catch(e){console.error(e)}
 }
 
-// Use SSE for real-time streaming, fallback to polling
-let sseOk=false;
-try{
-  const es=new EventSource('./api/stream?offset='+lastLen);
-  es.onmessage=function(e){
-    sseOk=true;
-    try{
-      const d=JSON.parse(e.data);
-      if(d.events&&d.events.length>0){
-        for(const ev of d.events)processEvent(ev);
-        lastLen=d.total;
-        renderAgents();render();updateStats();
-      }
-    }catch(err){console.error(err)}
-  };
-  es.onerror=function(){
-    if(!sseOk){es.close();startPolling();}
-  };
-}catch(e){startPolling();}
-
-function startPolling(){
-  setInterval(poll,1000);
-}
+// === Data Loading Strategy ===
+// Use polling only. Simple, reliable, no SSE edge cases.
+// Poll every 800ms — fast enough for real-time feel, no dedup issues.
+// On first load, offset=0 fetches ALL historical events.
+setInterval(poll, 800);
+poll(); // immediate first fetch
 
 // ─── Communication Map (D3.js force graph) ──────────────────────────
 let commInterval=null;
+let commMapVersion=0; // bumped on every event batch to detect changes
 function showCommMap(){
   document.getElementById('commOverlay').classList.add('show');
   renderCommMapD3();
-  // Auto-refresh every 3s
-  commInterval=setInterval(renderCommMapD3,3000);
+  // Auto-refresh every 2s
+  commInterval=setInterval(renderCommMapD3,2000);
 }
 function hideCommMap(){
   document.getElementById('commOverlay').classList.remove('show');
   if(commInterval){clearInterval(commInterval);commInterval=null;}
+}
+function updateCommMapIfOpen(){
+  commMapVersion++;
+  if(document.getElementById('commOverlay').classList.contains('show')){
+    renderCommMapD3();
+  }
 }
 
 let commSim=null;
@@ -535,10 +525,12 @@ function renderCommMapD3(){
     <span>📐 Density: <b>${(links.length/(nodes.length*(nodes.length-1)||1)*100).toFixed(1)}%</b></span>
   `;
 
-  // Only re-create SVG if node count changed
-  const prevCount=container.dataset.nodeCount|0;
-  if(parseInt(prevCount)===nodes.length && commSim) return; // skip re-render if same
+  // Re-create SVG if node count or edge data changed
+  const prevVersion=parseInt(container.dataset.mapVersion||'0');
+  const prevCount=parseInt(container.dataset.nodeCount||'0');
+  if(prevCount===nodes.length && prevVersion===commMapVersion && commSim) return;
   container.dataset.nodeCount=nodes.length;
+  container.dataset.mapVersion=commMapVersion;
   container.innerHTML='';
 
   const svg=d3.select(container).append('svg').attr('width',W).attr('height',H)

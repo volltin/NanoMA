@@ -2,6 +2,7 @@
 
 import http.server
 import json
+import math
 import os
 import sys
 import time
@@ -63,6 +64,15 @@ def get_cache() -> EventCache:
     return _cache
 
 
+def _safe_json(obj):
+    """Serialize to JSON, replacing Infinity/NaN with null (valid JSON)."""
+    def _default(o):
+        if isinstance(o, float) and (math.isinf(o) or math.isnan(o)):
+            return None
+        return str(o)
+    return json.dumps(obj, ensure_ascii=False, default=_default, allow_nan=False)
+
+
 class ViewerHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
@@ -98,6 +108,14 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 pass
 
+        # Support Last-Event-ID for auto-reconnect
+        last_id = self.headers.get("Last-Event-ID")
+        if last_id is not None:
+            try:
+                offset = int(last_id)
+            except ValueError:
+                pass
+
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -106,14 +124,22 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
         cache = get_cache()
+        BATCH_SIZE = 30  # send at most 30 events per SSE message
         try:
             while True:
                 new_events, total = cache.get_since(offset)
                 if new_events:
-                    data = json.dumps({"events": new_events, "total": total}, ensure_ascii=False, default=str)
-                    self.wfile.write(f"data: {data}\n\n".encode())
-                    self.wfile.flush()
-                    offset = total
+                    # Send in batches to avoid giant single messages
+                    while new_events:
+                        batch = new_events[:BATCH_SIZE]
+                        new_events = new_events[BATCH_SIZE:]
+                        offset += len(batch)
+                        data = _safe_json({"events": batch, "total": total, "offset": offset})
+                        # SSE spec: split on newlines, prefix each line with "data:"
+                        lines = data.split("\n")
+                        sse_data = "\n".join(f"data: {line}" for line in lines)
+                        self.wfile.write(f"id: {offset}\n{sse_data}\n\n".encode())
+                        self.wfile.flush()
                 time.sleep(0.5)
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass  # client disconnected
@@ -160,7 +186,7 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
             self._json_response({"error": str(e)})
 
     def _json_response(self, data):
-        body = json.dumps(data, ensure_ascii=False, default=str).encode()
+        body = _safe_json(data).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")

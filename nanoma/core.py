@@ -252,7 +252,7 @@ class Runtime:
             self.agents[parent].children.add(agent_id)
 
         self._emit(agent_id, "agent_new", {
-            "task": task, "model": model, "budget": quota.budget,
+            "task": task, "model": model, "budget": quota.budget if math.isfinite(quota.budget) else None,
             "parent": parent, "depth": depth,
         })
         return agent
@@ -637,7 +637,7 @@ Shared: {shared} (visible to all agents){time_info}
             }
             try:
                 events_file = self.config.log_dir / "events.jsonl"
-                line = json.dumps(trace_event, ensure_ascii=False, default=str) + "\n"
+                line = json.dumps(trace_event, ensure_ascii=False, default=str, allow_nan=False) + "\n"
                 with self._emit_lock:
                     with open(events_file, "a") as f:
                         f.write(line)
