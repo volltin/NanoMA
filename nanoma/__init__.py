@@ -1,4 +1,4 @@
-"""NanoMA v0.9.1 — Minimal multi-agent harness."""
+"""NanoMA v0.9.2 — Minimal multi-agent harness with workspace tools plugin."""
 
 from nanoma.core import (
     Agent,
@@ -19,4 +19,4 @@ __all__ = [
     "CostLedger", "RetryConfig",
     "ModelRegistry", "get_registry", "load_models",
 ]
-__version__ = "0.9.1"
+__version__ = "0.9.2"

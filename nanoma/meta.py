@@ -403,7 +403,8 @@ async def meta_batch(args: dict[str, Any], agent: "Agent", runtime: "Runtime") -
         return {"error": "File must contain a JSON array of {tool, args} objects"}
 
     from nanoma.tools import WORK_TOOLS
-    all_tools = {**WORK_TOOLS, **META_TOOLS}
+    from nanoma.plugins.workspace_tools import WORKSPACE_TOOLS
+    all_tools = {**WORK_TOOLS, **WORKSPACE_TOOLS, **META_TOOLS}
     results = []
 
     for i, call in enumerate(calls):

@@ -19,6 +19,7 @@ from nanoma.llm import (
 )
 from nanoma.scheduler import Scheduler
 from nanoma.tools import WORK_TOOLS
+from nanoma.plugins.workspace_tools import WORKSPACE_TOOLS
 
 logger = logging.getLogger("nanoma")
 
@@ -295,7 +296,8 @@ class Runtime:
 
     async def _agent_loop(self, agent: Agent):
         from nanoma.meta import META_TOOLS
-        all_tools = {**WORK_TOOLS, **META_TOOLS}
+        # Tool set: shell (universal primitive) + workspace (structured I/O) + meta (coordination)
+        all_tools = {**WORK_TOOLS, **WORKSPACE_TOOLS, **META_TOOLS}
         tool_schemas = [t["schema"] for t in all_tools.values()]
 
         try:
@@ -545,6 +547,20 @@ class Runtime:
         new_task = params.get("new_task")
         new_bio = params.get("new_bio")
 
+        # ─── Save full conversation to file before wiping ────────────────
+        import time as _time
+        timestamp = _time.strftime("%Y%m%d_%H%M%S")
+        archive_filename = f"{agent.id}_{timestamp}.jsonl"
+        archive_path = agent.workspace / ".rebirth" / archive_filename
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(archive_path, "w", encoding="utf-8") as f:
+            for msg in agent.history:
+                f.write(json.dumps(msg, ensure_ascii=False, default=str) + "\n")
+
+        archive_rel = f".rebirth/{archive_filename}"
+        # ─────────────────────────────────────────────────────────────────
+
         system_msg = agent.history[0] if agent.history else None
         agent.history = []
         if system_msg:
@@ -559,9 +575,16 @@ class Runtime:
         file_section = ""
         if files:
             file_section = "\n\nKey files:\n" + "\n".join(f"- {f}" for f in files)
-        agent.history.append({"role": "user", "content": (
-            f"[Rebirth — context reset]\n\n## Progress\n{summary}{file_section}"
-        )})
+
+        msg_count = sum(1 for _ in open(archive_path))
+        rebirth_notice = (
+            f"[Rebirth — context reset]\n\n"
+            f"⚠️ Your previous conversation ({msg_count} messages) "
+            f"has been compressed and saved to: `{archive_rel}`\n"
+            f"Use `ws_read_file` or `shell('cat {archive_rel}')` to review if needed.\n\n"
+            f"## Progress\n{summary}{file_section}"
+        )
+        agent.history.append({"role": "user", "content": rebirth_notice})
         agent.context_tokens = count_message_tokens(agent.history)
 
     async def _execute_tool(self, tc: ToolCall, agent: Agent, tools: dict) -> Any:
@@ -621,6 +644,13 @@ Task: {task}
 Workspace: {workspace} (private to you)
 Shared: {shared} (visible to all agents){time_info}
 {context_section}
+## Tool Philosophy
+You have tools in 3 layers:
+- shell: universal primitive. Use for mkdir, rm, mv, ls, find, tree, git, pip, curl, etc.
+- ws_* tools: structured operations (file create/read/edit, grep, code outline)
+- meta tools: coordination (spawn, send, wait, query, kill, transfer, etc.)
+
+When in doubt, use shell. The ws_* tools exist only for operations shell can't do reliably.
 """
 
     def _emit(self, agent_id: str, event_type: str, data: dict | None = None):
