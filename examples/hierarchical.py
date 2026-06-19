@@ -10,7 +10,6 @@ Usage:
 
 import asyncio
 import os
-import subprocess
 import sys
 from pathlib import Path
 import shutil
@@ -58,15 +57,6 @@ async def main():
     workspace.mkdir(parents=True)
     logs.mkdir(parents=True)
 
-    # Start viewer
-    viewer_py = Path(__file__).parent.parent / "nanoma" / "viewer.py"
-    subprocess.run(["fuser", "-k", "8900/tcp"], capture_output=True)
-    viewer = subprocess.Popen(
-        [sys.executable, str(viewer_py), str(logs), "8900"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    print(f"[viewer] http://localhost:8900")
-
     config = RuntimeConfig(
         budget=2.0,
         max_agents=25,
@@ -74,7 +64,7 @@ async def main():
         max_turns=30,
         max_concurrent_llm=8,
         time_limit=180,
-        default_model=os.environ.get("NANOMA_MODEL", "deepseek/deepseek-v4-flash"),
+        default_model=os.environ.get("NANOMA_MODEL", "mini"),
         workspace_root=workspace,
         log_dir=logs,
     )
@@ -102,12 +92,7 @@ async def main():
           f"Cost: ${stats['overview']['total_cost_usd']} | "
           f"Time: {stats['overview']['elapsed_seconds']}s")
     print(f"Result: {(result or '')[:200]}")
-    print(f"\n[viewer] http://localhost:8900 — Ctrl+C to stop")
-
-    try:
-        viewer.wait()
-    except KeyboardInterrupt:
-        viewer.terminate()
+    print(f"\nTrace: {logs / 'events.jsonl'}")
 
 
 if __name__ == "__main__":

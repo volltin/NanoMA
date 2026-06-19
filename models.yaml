@@ -1,3 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NanoMA model registry
+#
+#   models:   concrete provider models with pricing + context limits
+#   aliases:  short, stable names that resolve to a model OR a fusion (or another
+#             alias). Use them anywhere a model string is accepted: --model,
+#             RuntimeConfig.default_model, and spawn(model=...).
+#   fusion:   "fusion models" — using one as a model runs a Mixture-of-Agents: the
+#             panel members are spawned as real sub-agents that each solve the task,
+#             then the judge synthesizes. A fusion name is used like any model string.
+# ─────────────────────────────────────────────────────────────────────────────
+
 models:
   deepseek/deepseek-v4-pro:nitro:
     provider: deepseek
@@ -43,3 +55,39 @@ models:
       cached_input: 0.30
       output: 15.0
     tier: strong
+
+# Short, stable names → a model, a fusion, or another alias.
+aliases:
+  # Generic capability tiers (provider-agnostic) — prefer these in tasks/presets.
+  nano: gpt-4o-mini                          # smallest / cheapest
+  mini: deepseek/deepseek-v4-flash:nitro     # cheap workhorse
+  air:  claude-haiku-4-5-20251001            # mid
+  pro:  deepseek/deepseek-v4-pro:nitro       # strong
+  max:  claude-sonnet-4-6                    # strongest
+  # Bare/legacy names (keep older configs working)
+  flash: deepseek/deepseek-v4-flash:nitro
+  deepseek-v4-flash: deepseek/deepseek-v4-flash:nitro
+  deepseek-v4-pro: deepseek/deepseek-v4-pro:nitro
+  deepseek/deepseek-v4-flash: deepseek/deepseek-v4-flash:nitro
+  deepseek/deepseek-v4-pro: deepseek/deepseek-v4-pro:nitro
+  # Role aliases
+  default: deepseek/deepseek-v4-flash:nitro
+  fusion: fusion-quality          # alias → fusion model
+
+# Fusion models: each panel member is spawned as a real sub-agent to solve the task;
+# the judge agent then synthesizes their answers. `panel`/`judge` may use aliases.
+fusion:
+  # Frontier panel — best quality, ~4-5x the cost of a single run.
+  fusion-quality:
+    panel: [pro, max, nano]
+    judge: pro
+
+  # Budget panel — diverse cheap models, much cheaper than a frontier model.
+  fusion-budget:
+    panel: [mini, nano, air]
+    judge: mini
+
+  # Self-fusion — same model run twice + synthesized. Cheapest quality bump.
+  fusion-self:
+    panel: [mini, mini]
+    judge: mini

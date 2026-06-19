@@ -8,8 +8,6 @@ Usage:
 """
 
 import asyncio
-import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -23,10 +21,9 @@ def parse_args():
     p.add_argument("preset", help="Path to preset .md file")
     p.add_argument("task", help="Task to inject into {task} placeholder")
     p.add_argument("--budget", type=float, default=2.0)
-    p.add_argument("--model", default="deepseek/deepseek-v4-flash")
+    p.add_argument("--model", default="mini")
     p.add_argument("--max-agents", type=int, default=20)
     p.add_argument("--time-limit", type=int, default=180)
-    p.add_argument("--viewer-port", type=int, default=8900)
     return p.parse_args()
 
 
@@ -51,15 +48,6 @@ async def main():
     logs = Path("./logs")
     workspace.mkdir(parents=True, exist_ok=True)
     logs.mkdir(parents=True, exist_ok=True)
-
-    # Start viewer
-    viewer_py = Path(__file__).parent.parent / "nanoma" / "viewer.py"
-    subprocess.run(["fuser", "-k", f"{args.viewer_port}/tcp"], capture_output=True)
-    viewer = subprocess.Popen(
-        [sys.executable, str(viewer_py), str(logs), str(args.viewer_port)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    print(f"[viewer] http://localhost:{args.viewer_port}")
 
     # Configure runtime
     config = RuntimeConfig(
@@ -97,13 +85,7 @@ async def main():
           f"Cost: ${stats['overview']['total_cost_usd']} | "
           f"Time: {stats['overview']['elapsed_seconds']}s")
     print(f"\nResult: {(result or '')[:500]}")
-    print(f"\n[viewer] still running at http://localhost:{args.viewer_port}")
-
-    # Keep viewer alive
-    try:
-        viewer.wait()
-    except KeyboardInterrupt:
-        viewer.terminate()
+    print(f"\nTrace: {logs / 'events.jsonl'}")
 
 
 if __name__ == "__main__":

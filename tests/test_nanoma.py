@@ -1,22 +1,15 @@
 """Tests for NanoMA framework — no real LLM calls, fully deterministic."""
 
-import asyncio
-import json
 import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock
 
-from nanoma.core import Agent, Envelope, ResourceQuota, Runtime, RuntimeConfig, ToolContext
+from nanoma.core import Envelope, ResourceQuota, Runtime, RuntimeConfig, ToolContext
 from nanoma.cost import CostLedger, UsageRecord
 from nanoma.llm import LLMResponse, ToolCall, estimate_tokens, count_message_tokens
-from nanoma.meta import (
+from nanoma.tools.meta import (
     meta_spawn, meta_kill, meta_send, meta_query, meta_wait,
-    meta_transfer, meta_set_bio, meta_get_cost, meta_set_status,
-    meta_rebirth, meta_submit, meta_batch, META_TOOLS,
+    meta_get_cost, meta_set_status, meta_submit,
 )
-from nanoma.tools import WORK_TOOLS
-from nanoma.models import ModelRegistry, load_models
+from nanoma.models import load_models
 from nanoma.scheduler import Scheduler
 
 
@@ -222,16 +215,15 @@ async def test_meta_query_all(runtime):
     a = runtime.create_agent("querier")
     result = await meta_query({}, a, runtime)
     assert result["count"] == 3
-    assert all("bio" in x for x in result["agents"])
+    assert all("task" in x for x in result["agents"])
 
 
 @pytest.mark.asyncio
 async def test_meta_query_single(runtime):
     a = runtime.create_agent("target")
-    a.bio = "I am a coder"
     b = runtime.create_agent("querier")
     result = await meta_query({"agent_id": a.id}, b, runtime)
-    assert result["bio"] == "I am a coder"
+    assert result["task"] == "target"
     assert "messages" not in result  # messages=0 by default
 
 
@@ -261,13 +253,6 @@ async def test_meta_query_all_messages(runtime):
 
 
 @pytest.mark.asyncio
-async def test_meta_set_bio(runtime):
-    a = runtime.create_agent("worker")
-    result = await meta_set_bio({"bio": "I handle parsing"}, a, runtime)
-    assert a.bio == "I handle parsing"
-
-
-@pytest.mark.asyncio
 async def test_meta_get_cost(runtime):
     a = runtime.create_agent("worker")
     a._turns = 5
@@ -284,24 +269,9 @@ async def test_meta_get_cost(runtime):
 @pytest.mark.asyncio
 async def test_meta_set_status(runtime):
     a = runtime.create_agent("worker")
-    result = await meta_set_status({"status": "done", "result": "finished!"}, a, runtime)
+    await meta_set_status({"status": "done", "result": "finished!"}, a, runtime)
     assert a.status == "done"
     assert a.result == "finished!"
-
-
-@pytest.mark.asyncio
-async def test_meta_rebirth(runtime):
-    a = runtime.create_agent("worker")
-    a.bio = "old bio"
-    # Add some history
-    for i in range(10):
-        a.history.append({"role": "user", "content": f"msg {i}"})
-    result = await meta_rebirth({"summary": "Did steps 1-5", "new_bio": "updated bio"}, a, runtime)
-    assert result["scheduled"]
-    # Execute rebirth
-    runtime._execute_rebirth(a)
-    assert a.bio == "updated bio"
-    assert len(a.history) == 2  # system + rebirth message
 
 
 @pytest.mark.asyncio
@@ -316,55 +286,6 @@ async def test_meta_submit(runtime):
     # Check shared copy exists
     shared = runtime._tool_context.shared_dir / "output.txt"
     assert shared.exists()
-
-
-@pytest.mark.asyncio
-async def test_meta_batch(runtime):
-    a = runtime.create_agent("worker")
-    # Write a batch file
-    batch_data = [
-        {"tool": "file_write", "args": {"path": "hello.txt", "content": "world"}},
-        {"tool": "file_list", "args": {"path": "."}},
-        {"tool": "nonexistent_tool", "args": {}},
-    ]
-    batch_file = a.workspace / "batch.json"
-    batch_file.write_text(json.dumps(batch_data))
-    result = await meta_batch({"path": "batch.json"}, a, runtime)
-    assert result["executed"] == 3
-    # First should succeed
-    assert "error" not in result["results"][0]
-    # Third should fail (unknown tool)
-    assert "error" in result["results"][2]
-    # Verify file was actually written
-    assert (a.workspace / "hello.txt").read_text() == "world"
-
-
-@pytest.mark.asyncio
-async def test_meta_transfer_push(runtime):
-    a = runtime.create_agent("sender")
-    b = runtime.create_agent("receiver")
-    (a.workspace / "data.txt").write_text("content")
-    result = await meta_transfer({"src": "data.txt", "to": b.id}, a, runtime)
-    assert "data.txt" in result["pushed"]
-    assert (b.workspace / "data.txt").read_text() == "content"
-
-
-@pytest.mark.asyncio
-async def test_meta_transfer_pull(runtime):
-    a = runtime.create_agent("puller")
-    b = runtime.create_agent("source")
-    (b.workspace / "info.txt").write_text("pulled content")
-    result = await meta_transfer({"src": "info.txt", "from_agent": b.id}, a, runtime)
-    assert "info.txt" in result["pulled"]
-    assert (a.workspace / "info.txt").read_text() == "pulled content"
-
-
-@pytest.mark.asyncio
-async def test_meta_transfer_shared(runtime):
-    a = runtime.create_agent("worker")
-    (a.workspace / "shared_file.txt").write_text("shared!")
-    result = await meta_transfer({"src": "shared_file.txt", "to": "shared"}, a, runtime)
-    assert (runtime._tool_context.shared_dir / "shared_file.txt").exists()
 
 
 @pytest.mark.asyncio
@@ -384,42 +305,28 @@ async def test_meta_wait_immediate(runtime):
 
 @pytest.mark.asyncio
 async def test_tool_file_write_read(tmp_workspace):
-    from nanoma.tools import tool_file_write, tool_file_read
+    from nanoma.tools import tool_create_file, tool_read_file_advanced
     ctx = ToolContext(shared_dir=tmp_workspace / "shared", workspace_root=tmp_workspace)
     ws = tmp_workspace / "agent"
     ws.mkdir()
 
     # Write
-    result = await tool_file_write({"path": "test.txt", "content": "hello world"}, ws, ctx)
-    assert result["bytes"] == 11
+    result = await tool_create_file({"path": "test.txt", "content": "hello world"}, ws, ctx)
+    assert result["bytes_written"] == 11
 
     # Read
-    result = await tool_file_read({"path": "test.txt"}, ws, ctx)
-    assert result["content"] == "hello world"
+    result = await tool_read_file_advanced({"path": "test.txt"}, ws, ctx)
+    assert "hello world" in result["content"]
 
 
 @pytest.mark.asyncio
 async def test_tool_file_read_sandbox(tmp_workspace):
-    from nanoma.tools import tool_file_read
+    from nanoma.tools import tool_read_file_advanced
     ctx = ToolContext(shared_dir=tmp_workspace / "shared", workspace_root=tmp_workspace)
     ws = tmp_workspace / "agent"
     ws.mkdir()
-    result = await tool_file_read({"path": "/etc/passwd"}, ws, ctx)
+    result = await tool_read_file_advanced({"path": "/etc/passwd"}, ws, ctx)
     assert "error" in result  # outside workspace
-
-
-@pytest.mark.asyncio
-async def test_tool_file_list(tmp_workspace):
-    from nanoma.tools import tool_file_list
-    ctx = ToolContext(shared_dir=tmp_workspace / "shared", workspace_root=tmp_workspace)
-    ws = tmp_workspace / "agent"
-    ws.mkdir()
-    (ws / "a.txt").write_text("a")
-    (ws / "b.txt").write_text("b")
-    result = await tool_file_list({"path": "."}, ws, ctx)
-    names = [e["name"] for e in result["entries"]]
-    assert "a.txt" in names
-    assert "b.txt" in names
 
 
 @pytest.mark.asyncio
@@ -446,14 +353,14 @@ async def test_tool_shell_timeout(tmp_workspace):
 
 @pytest.mark.asyncio
 async def test_tool_grep(tmp_workspace):
-    from nanoma.tools import tool_grep
+    from nanoma.tools import tool_grep_search
     ctx = ToolContext(shared_dir=tmp_workspace / "shared", workspace_root=tmp_workspace)
     ws = tmp_workspace / "agent"
     ws.mkdir()
     (ws / "code.py").write_text("def hello():\n    return 42\n")
-    result = await tool_grep({"pattern": "hello", "path": "."}, ws, ctx)
+    result = await tool_grep_search({"query": "hello"}, ws, ctx)
     assert result["count"] >= 1
-    assert any("hello" in m for m in result["matches"])
+    assert any("hello" in m["content"] for m in result["matches"])
 
 
 # ─── Test: Model registry ────────────────────────────────────────────────────
@@ -537,8 +444,8 @@ async def test_spawn_and_wait(tmp_workspace):
 
 
 @pytest.mark.asyncio
-async def test_bio_discovery(tmp_workspace):
-    """Agents can discover each other via bio."""
+async def test_query_discovery(tmp_workspace):
+    """Agents can discover each other (id, status, task) via query()."""
     async def mock_llm(messages, model, tools=None, **kwargs):
         return LLMResponse(
             tool_calls=[ToolCall(id="t1", name="set_status", arguments={"status": "done", "result": "ok"})],
@@ -547,14 +454,10 @@ async def test_bio_discovery(tmp_workspace):
 
     config = RuntimeConfig(workspace_root=tmp_workspace, budget=10.0, log_dir=None)
     rt = Runtime(config=config, llm_call=mock_llm)
-    a = rt.create_agent("worker A")
-    b = rt.create_agent("worker B")
-    a.bio = "I handle file parsing"
-    b.bio = "I do testing"
-
-    # Agent C queries all
+    rt.create_agent("worker A")
+    rt.create_agent("worker B")
     c = rt.create_agent("coordinator")
     result = await meta_query({}, c, rt)
-    bios = [x["bio"] for x in result["agents"]]
-    assert "I handle file parsing" in bios
-    assert "I do testing" in bios
+    tasks = [x["task"] for x in result["agents"]]
+    assert "worker A" in tasks
+    assert "worker B" in tasks

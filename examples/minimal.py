@@ -24,7 +24,7 @@ async def main():
         budget=1.0,
         max_agents=10,
         max_turns=30,
-        default_model=os.environ.get("NANOMA_MODEL", "deepseek/deepseek-v4-flash"),
+        default_model=os.environ.get("NANOMA_MODEL", "mini"),
         workspace_root=Path("./workspace"),
         log_dir=Path("./logs"),
     )

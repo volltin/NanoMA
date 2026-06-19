@@ -1,4 +1,4 @@
-"""NanoMA v0.9.2 — Minimal multi-agent harness with workspace tools plugin."""
+"""NanoMA v0.10.0 — Minimal multi-agent harness with model aliases + fusion."""
 
 from nanoma.core import (
     Agent,
@@ -11,12 +11,12 @@ from nanoma.core import (
 )
 from nanoma.cost import CostLedger
 from nanoma.llm import RetryConfig
-from nanoma.models import ModelRegistry, get_registry, load_models
+from nanoma.models import FusionDef, ModelRegistry, get_registry, load_models
 
 __all__ = [
     "Agent", "Artifact", "Envelope", "ResourceQuota",
     "Runtime", "RuntimeConfig", "ToolContext",
     "CostLedger", "RetryConfig",
-    "ModelRegistry", "get_registry", "load_models",
+    "FusionDef", "ModelRegistry", "get_registry", "load_models",
 ]
-__version__ = "0.9.2"
+__version__ = "0.10.0"

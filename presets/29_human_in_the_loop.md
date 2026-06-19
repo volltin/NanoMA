@@ -25,7 +25,7 @@ An external system or human sends a message to resume the agent with the approva
 ## Integration:
 External systems respond by calling:
   runtime.deliver(Envelope(from_id="human", to_id=<agent>, content="yes", ...))
-Or a human uses the trace viewer to send approval.
+Or a human inspects the trace (`logs/events.jsonl`) and sends approval.
 
 ## Rules:
 - NEVER execute risky actions without explicit approval

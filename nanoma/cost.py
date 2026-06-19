@@ -46,6 +46,11 @@ class CostLedger:
     total_budget: float = 10.0
     total_spent: float = 0.0
     per_agent: dict[str, float] = field(default_factory=dict)
+    # Token accounting — lets stats() expose cache-hit rate, the key signal for
+    # runaway multi-turn cost (a 0% rate means the prefix is re-billed every turn).
+    total_input_tokens: int = 0
+    total_cached_input_tokens: int = 0
+    total_output_tokens: int = 0
 
     def remaining(self) -> float:
         return max(0.0, self.total_budget - self.total_spent)
@@ -57,7 +62,14 @@ class CostLedger:
         cost = usage.cost_usd()
         self.total_spent += cost
         self.per_agent[agent_id] = self.per_agent.get(agent_id, 0.0) + cost
+        self.total_input_tokens += usage.input_tokens
+        self.total_cached_input_tokens += usage.cached_input_tokens
+        self.total_output_tokens += usage.output_tokens
         return cost
+
+    def cache_hit_rate(self) -> float:
+        """Fraction of input tokens served from cache (0.0-1.0)."""
+        return (self.total_cached_input_tokens / self.total_input_tokens) if self.total_input_tokens else 0.0
 
     def estimate_cost(self, model: str, input_tokens: int, output_tokens: int = 1000) -> float:
         from nanoma.models import get_registry
@@ -73,4 +85,8 @@ class CostLedger:
             "spent": round(self.total_spent, 6),
             "remaining": round(self.remaining(), 6),
             "per_agent": {k: round(v, 6) for k, v in self.per_agent.items()},
+            "input_tokens": self.total_input_tokens,
+            "cached_input_tokens": self.total_cached_input_tokens,
+            "output_tokens": self.total_output_tokens,
+            "cache_hit_rate": round(self.cache_hit_rate(), 4),
         }

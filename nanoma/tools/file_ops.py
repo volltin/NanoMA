@@ -1,21 +1,20 @@
-"""Workspace Tools Plugin - File Operations Module.
+"""Workspace tools — file operations.
 
-Implements the following tools:
-- create_file: Create a new file with auto-created parent directories
-- append_file: Append content to a file (create if not exists)
-- read_file: Read file content with offset/limit support
-- rename_file: Rename or move a file/directory
-- delete_file: Permanently delete a file or directory
-- create_directory: Create directory recursively (mkdir -p)
-- list_dir: List directory contents (with optional recursion)
-- read_project_structure: Read project tree structure
-- file_search: Search files by glob pattern
+Implements:
+- create_file: create a new file (auto-creates parent directories)
+- append_file: append content to a file (create if not exists)
+- read_file: read file content with offset/limit support
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
+
+from nanoma.tools.output import clip_text
+
+if TYPE_CHECKING:
+    from nanoma.state import ToolContext
 
 
 async def tool_create_file(args: dict[str, Any], workspace: Path, ctx: "ToolContext") -> dict[str, Any]:
@@ -46,7 +45,12 @@ async def tool_create_file(args: dict[str, Any], workspace: Path, ctx: "ToolCont
         return {"error": "Access denied: path is outside workspace root"}
 
     if path.exists() and not overwrite:
-        return {"error": f"File already exists: {path}. Pass overwrite=true to replace."}
+        return {
+            "error": f"File already exists: {path}",
+            "hint": "Re-call create_file with overwrite=true to replace it "
+                    "(common after scaffolding like `cargo new` creates a stub file).",
+            "existing_bytes": path.stat().st_size,
+        }
 
     # Auto-create parent directories
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,18 +123,52 @@ async def tool_read_file_advanced(args: dict[str, Any], workspace: Path, ctx: "T
     content = path.read_text(encoding="utf-8", errors="replace")
     all_lines = content.split("\n")
     total_lines = len(all_lines)
+    total_chars = len(content)
 
-    # Compute reading range
+    # Compute reading range (line-based)
     start_line = max(1, offset) if offset else 1
     max_lines = limit if limit else 2000
     end_line = min(start_line + max_lines - 1, total_lines)
 
     selected_lines = all_lines[start_line - 1:end_line]
-    result_content = "\n".join(selected_lines)
+    chunk = "\n".join(selected_lines)
 
-    return {
-        "content": result_content,
+    # Char budget: even a bounded line range can be huge if lines are long. Clip the
+    # chunk and report PRECISELY what was shown so the agent can page through the rest.
+    max_chars = getattr(ctx, "file_read_max_chars", 0) or 0
+    preview, meta = clip_text(chunk, max_chars)
+    long_line = False
+    if meta["truncated"]:
+        if meta["shown_lines"] == 0:
+            # A single line longer than the char budget — shown partially. Advance past
+            # it so paging can't loop forever; flag it so the agent can widen the read.
+            read_to = start_line
+            long_line = True
+        else:
+            read_to = start_line - 1 + meta["shown_lines"]
+    else:
+        read_to = end_line
+
+    has_more = read_to < total_lines
+    result: dict[str, Any] = {
+        "content": preview,
         "total_lines": total_lines,
+        "total_chars": total_chars,
         "read_from": start_line,
-        "read_to": end_line,
+        "read_to": read_to,
+        "has_more": has_more,
     }
+    if long_line:
+        result["note"] = (
+            f"Line {start_line} is longer than the {max_chars}-char budget and was shown "
+            f"partially ({len(preview)} chars). Use shell (e.g. sed/cut) to read the rest, "
+            f"or read_file(path='{file_path}', offset={start_line + 1}) to continue past it."
+        )
+    elif has_more:
+        reason = "char limit" if meta["truncated"] else "line limit"
+        result["note"] = (
+            f"Showed lines {start_line}–{read_to} of {total_lines} "
+            f"({len(preview)} of {total_chars} chars; stopped at {reason}). "
+            f"Read more with read_file(path='{file_path}', offset={read_to + 1})."
+        )
+    return result
